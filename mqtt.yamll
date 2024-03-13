@@ -1,0 +1,9 @@
+# For OTA updates to work add these lines to your HomeAssistant mqtt file.
+
+switch:
+  - unique_id: inverter_ota
+    name: "inverter OTA Mode"
+    command_topic: "inverter/ota"
+    state_topic: "inverter/ota"
+    icon: "mdi:upload"
+    retain: true
