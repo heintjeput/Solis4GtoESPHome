@@ -1,0 +1,290 @@
+substitutions:
+  devicename: "inverter"
+
+globals:
+  - id: ota_mode
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+esphome:
+  name: "inverter"
+  friendly_name: inverter
+  platformio_options:
+    board_build.flash_mode: dio
+
+  on_boot:
+    priority: 600
+    then:
+      - text_sensor.template.publish:
+          id: online_template
+          state: "booted"
+  on_shutdown:
+    priority: 200
+    then:
+      - text_sensor.template.publish:
+          id: online_template
+          state: "shutdown"
+
+esp32:
+  board: esp32-c3-devkitm-1
+ 
+
+# Enable logging
+logger: 
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: #secret
+
+ota:
+  password: #secret
+  on_end:
+    then:
+    - lambda: |-
+        id(ota_mode) = 0;
+    - mqtt.publish:
+        topic: "$devicename/ota"
+        payload: "OFF"
+        retain: true
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    static_ip: 192.168.178.197
+    gateway: 192.168.178.1
+    subnet: 255.255.255.0
+    dns1: 192.168.178.1
+  fast_connect: True
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "inverter Fallback Hotspot"
+    password: "14jdpJVsJPXC"
+
+captive_portal:
+
+deep_sleep:
+  id: deep_sleep_1
+  run_duration: 6s
+  sleep_duration: 124s
+
+mqtt:
+  id: mqtt_cli
+  broker: !secret homeassistant_ip
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  discovery: false
+  discovery_retain: false
+  birth_message:
+  will_message:
+  on_message:
+    - topic: $devicename/ota
+      payload: 'ON'
+      then:
+        - deep_sleep.prevent: deep_sleep_1
+        - lambda: |-
+           id(ota_mode) = 1;
+    - topic: $devicename/ota
+      payload: 'OFF'
+      then:
+        - deep_sleep.allow: deep_sleep_1
+        - lambda: |-
+           id(ota_mode) = 0;
+
+
+# PCB pin out
+# 5 - TX
+# 6 - Flow
+# 7 - Rx
+# 18 - SDA
+# 19 - SCL
+
+i2c:
+  - sda: 18
+    scl: 19
+    #scan: True
+    #id: bus_a
+    #frequency: 10kHz
+
+uart:
+  baud_rate: 9600
+  tx_pin: 5
+  rx_pin: 7
+  parity: NONE
+  stop_bits: 1
+  id: mod_uart
+
+modbus:
+  send_wait_time: 200ms
+  uart_id: mod_uart
+  id: mod_bus
+  flow_control_pin: 6
+
+modbus_controller:
+  - id: mbc
+    #address: 0x01
+    modbus_id: mod_bus
+    #command_throttle: 100ms
+    #setup_priority: -10
+    update_interval: 5s
+
+debug:
+  update_interval: 1s
+
+text_sensor:
+  - platform: template
+    name: "Online sensor"
+    id: online_template
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal Sensor"
+    update_interval: 5s
+
+  - platform: aht10
+    variant: aht20
+    temperature:
+      name: "AHT21Temperature"
+    humidity:
+      name: "AHT21Humidity"
+    update_interval: 5s
+    id: aht21
+    address: 0x38
+
+  - platform: modbus_controller # Read current AC power as Unsigned 32-Bit
+    modbus_controller_id: mbc
+    name: "InvAcWatt"
+    address: 3004
+    register_type: "read"
+    value_type: U_DWORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    id: InvAcWatt
+    
+  - platform: modbus_controller # Read current DC Voltage as Unsigned 16-Bit
+    modbus_controller_id: mbc
+    name: "InvDcVolt"
+    address: 3021
+    register_type: "read"
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+    device_class: voltage
+    state_class: measurement
+    id: InvDcVolt
+
+  - platform: modbus_controller # Read current DC Current as Unsigned 16-Bit
+    modbus_controller_id: mbc
+    name: "InvDcCurrent"
+    address: 3022
+    register_type: "read"
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+    device_class: current
+    state_class: measurement
+    id: InvDcCurrent
+
+  - platform: modbus_controller # Read current AC Voltage as Unsigned 16-Bit
+    modbus_controller_id: mbc
+    name: "InvAcVolt"
+    address: 3035
+    register_type: "read"
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+    device_class: voltage
+    state_class: measurement
+    id: InvAcVolt
+
+  - platform: modbus_controller # Read current AC Current as Unsigned 16-Bit
+    modbus_controller_id: mbc
+    name: "InvAcCurrent"
+    address: 3038
+    register_type: "read"
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+    device_class: current
+    state_class: measurement
+    id: InvAcCurrent
+
+  - platform: modbus_controller # Read current AC Frequency as Unsigned 16-Bit
+    modbus_controller_id: mbc
+    name: "InvAcFreq"
+    address: 3042
+    register_type: "read"
+    value_type: U_WORD
+    unit_of_measurement: "Hz"
+    filters:
+      - multiply: 0.01
+    accuracy_decimals: 2
+    device_class: frequency
+    state_class: measurement
+    id: InvAcFreq
+
+  - platform: modbus_controller # Read current Inverter Temperature as Signed 16-Bit
+    modbus_controller_id: mbc
+    name: "InvTemperature"
+    address: 3041
+    register_type: "read"
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    id: InvTemperature
+
+  - platform: modbus_controller # Read All Time Energy Generated as Unsigned 32-Bit
+    modbus_controller_id: mbc
+    name: "InvAllTimeEnergy"
+    address: 3008
+    register_type: "read"
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    state_class: total_increasing
+    device_class: energy
+    id: InvAllTimeEnergy
+
+  - platform: modbus_controller # Read Today Energy Generated as Unsigned 16-Bit
+    modbus_controller_id: mbc
+    name: "InvTodayEnergy"
+    address: 3014
+    register_type: "read"
+    value_type: U_WORD
+    unit_of_measurement: "kWh"
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+    device_class: energy
+    state_class: total_increasing
+    id: InvTodayEnergy
+
+  - platform: debug
+    # free:
+      # name: "Heap Free"
+    # fragmentation:
+      # name: "Heap Fragmentation"
+    # block:
+      # name: "Heap Max Block"
+    loop_time:
+      name: "Loop Time"
+    # psram:
+      # name: "Free PSRAM"
+
+
